@@ -1,0 +1,214 @@
+#include <WiFi.h>
+#include <WiFiMulti.h>
+const char* ssid     = "Error_404"; // Your SSID (Name of your WiFi)
+const char* password = "99775533110"; //Your Wifi password
+String api_key = "ZV3NC5VC6VBD0OVC"; // Your API Key provied by thingspeak
+const char* host = "api.thingspeak.com";
+WiFiMulti WiFiMulti;
+
+
+//DHT
+#include "DHT.h"
+#define DHTPIN 4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+//ultrasonic with led
+#define trigPin 26
+#define echoPin 25
+#define buzzer 27
+const int ledPin = 14;
+long duration;
+int distance;
+int safetyDistance;
+
+//Water level sensor
+#define POWER_PIN  17 // ESP32 pin GIOP17 connected to sensor's VCC pin
+#define SIGNAL_PIN 36 // ESP32 pin GIOP36 (ADC0) connected to sensor's signal pin
+int value = 0; //variable to store the sensor value
+
+
+const int LDRpin = 32;// declare LDR sensor out pin connected D32
+const int ledpin = 18; //for led pin green
+int LDRStatus = 0; // variable will be change
+
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x27, 16,2);
+void setup()
+{
+  Serial.begin(9600);
+  Serial.println("Flood Monitoring and Alert System");
+  dht.begin();
+  Connect_to_Wifi();
+  
+  //LCD Display
+  lcd.init(); //initialize lcd
+  lcd.backlight(); //turn on lcd backlight
+
+  //Ultrasonic sensor
+  pinMode(echoPin, INPUT);
+  pinMode(trigPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+
+  //Water level sensor
+  pinMode(POWER_PIN, OUTPUT); //configure D7 pin as an output  POWER_PIN
+  digitalWrite(POWER_PIN, LOW); //turn the sensor off
+
+  //Dark & Light Detector using LDR sensor module
+  pinMode(12, OUTPUT); // initialize LED pin as output
+  pinMode(LDRpin, INPUT); //initialize LDR module pin as an intput
+  
+}
+
+void loop() 
+{
+
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  float f = dht.readTemperature(true);
+
+  if (isnan(h) || isnan(t) || isnan(f))
+  {
+    Serial.println(F("Failed to read from DHT sensor!"));
+    return;
+  }
+  Serial.println();
+  Serial.print("Temperature: ");
+  Serial.print(t);
+  Serial.println("°C ");
+  lcd.setCursor(0,0);//set the cursor on the first row and column
+  lcd.print("T=");
+  lcd.print(dht.readTemperature());//print the temperature
+  lcd.print((char)223);
+  lcd.print("C");
+  
+  Serial.print("Humidity: ");
+  Serial.print(h);
+  Serial.print("%");
+  lcd.setCursor( 0, 1);
+  lcd.print("H=");
+  lcd.print(dht.readHumidity()); //print the humidity
+  lcd.print("%");
+  Send_Data(t, h); // call function to send data to Thingspeak
+
+  //Ultrasonic sensor
+  digitalWrite(trigPin, LOW); //clear the trigpin
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);// Sets the trigPin on HIGH state for 10 micro seconds
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH); //measure duration of pulse from echo pin
+  distance = 0.017 * duration; //calculate the distance
+
+  safetyDistance = distance;
+  if (safetyDistance <= 8) 
+  {
+    digitalWrite(buzzer, HIGH);//turn ON BUZZER
+    digitalWrite(ledPin, HIGH);//turn ON LED
+  } else {
+    digitalWrite(buzzer, LOW);
+    digitalWrite(ledPin, LOW);
+  }
+  Serial.print("Distance: "); //print value to serial monitor
+  Serial.print(distance);
+  Serial.println(" cm");
+  lcd.setCursor(10,0);
+  lcd.print("D:");
+  lcd.print(distance);
+
+  //Water level sensor
+  digitalWrite(POWER_PIN, HIGH);//turn the sensor ON
+  delay(10);
+  value = analogRead(SIGNAL_PIN);//read the analoge value from sensor
+  digitalWrite(POWER_PIN, LOW);
+  Serial.print("The Water sensor level value: ");
+  Serial.println(value);
+  lcd.setCursor(9,1);
+  lcd.print("Wl:");
+  lcd.print(value);
+
+  //LDR sensor module
+  int LDRState = digitalRead(LDRpin);
+  if (LDRState == HIGH) 
+  {
+    digitalWrite(12, HIGH);//LOW
+    Serial.print("System says, It indicates Darkness. Turn on LED");
+  } else {
+    digitalWrite(12, LOW);
+    Serial.print("System says, It is pointing Light. Turn off LED");//It indicates Light. Turn on LED
+  }
+
+
+
+}
+
+void Connect_to_Wifi()
+{
+  // We start by connecting to a WiFi network
+  WiFiMulti.addAP(ssid, password);
+  Serial.println();
+  Serial.println();
+  Serial.print("Wait for WiFi...");
+  while (WiFiMulti.run() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("");
+  Serial.println("WiFi connected. BOOM!");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void Send_Data(float t, float h)
+{
+
+  // map the moist to 0 and 100% for a nice overview in thingspeak.
+  Serial.println(" ");
+  Serial.println("Prepare to send data in ThingSpeak...");
+  Serial.println();
+  
+  WiFiClient client;//Use WiFiClient class to create TCP connections
+  const int httpPort = 80;
+
+  if (!client.connect(host, httpPort))
+  {
+
+    Serial.println("connection failed");
+    return;
+  }
+  else
+  {
+    String data_to_send = api_key;
+    data_to_send += "&field1=";
+    data_to_send += String(t);
+    data_to_send += "&field2=";
+    data_to_send += String(h);
+    data_to_send += "&field3=";
+    data_to_send += String(distance);
+    data_to_send += "&field4=";
+    data_to_send += String(value);
+    //data_to_send += "&field5=";
+    //data_to_send += String();
+    //data_to_send += "&field6=";
+    //data_to_send += String(distance);
+    data_to_send += "\r\n\r\n";
+
+    client.print("POST /update HTTP/1.1\n");
+    client.print("Host: api.thingspeak.com\n");
+    client.print("Connection: close\n");
+    client.print("X-THINGSPEAKAPIKEY: " + api_key + "\n");
+    client.print("Content-Type: application/x-www-form-urlencoded\n");
+    client.print("Content-Length: ");
+    client.print(data_to_send.length());
+    client.print("\n\n");
+    client.print(data_to_send);
+
+    delay(8000);
+  }
+
+  client.stop();
+
+}
