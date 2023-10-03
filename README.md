@@ -1,5 +1,5 @@
 # IoT-based-weather-monitoring-system-using-esp32
-esp32 based flood monitoring system with iot
+ESP32 based flood monitoring system with Thingspeak IoT
 
 
-This was my first university project. I tried to explore new things and gives me peace.
+This was my first university project. I tried to explore new things and it gaves me peace.
